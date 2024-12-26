@@ -2,13 +2,12 @@ import os
 import PyPDF2
 from transformers import AutoTokenizer, AutoModel
 import torch
-import faiss
-import numpy as np
-import pickle
+import chromadb
+from chromadb.config import Settings
 
 # Directory containing PDFs
-pdf_directory = "./pdfs"
-output_directory = "./vectordb"
+pdf_directory = "pdfs"
+output_directory = "vectordb"
 os.makedirs(output_directory, exist_ok=True)
 
 # Chunk size and model for embeddings
@@ -36,12 +35,14 @@ def encode_texts(texts):
     with torch.no_grad():
         outputs = model(**inputs)
         embeddings = outputs.last_hidden_state[:, 0, :]
-    return embeddings.cpu().numpy()
+    return embeddings.cpu().numpy().tolist()
 
-# Initialize FAISS index
-embedding_dim = model.config.hidden_size
-index = faiss.IndexFlatL2(embedding_dim)
-metadata = []  # To store metadata for embeddings
+# Initialize ChromaDB client with persistent storage
+client = chromadb.PersistentClient(path=output_directory)
+
+# Create a single collection for all PDFs
+collection_name = "all_pdfs"
+collection = client.get_or_create_collection(name=collection_name)
 
 # Process each PDF
 for pdf_file in os.listdir(pdf_directory):
@@ -51,15 +52,12 @@ for pdf_file in os.listdir(pdf_directory):
         chunks = pdf_to_chunks(pdf_path, chunk_size)
         embeddings = encode_texts(chunks)
 
-        # Add embeddings to the FAISS index
-        index.add(embeddings)
-
-        # Store metadata for each chunk
-        metadata.extend([(pdf_file, i) for i in range(len(chunks))])
-
-# Save the FAISS index and metadata
-faiss.write_index(index, os.path.join(output_directory, "vector_index.faiss"))
-with open(os.path.join(output_directory, "metadata.pkl"), "wb") as f:
-    pickle.dump(metadata, f)
+        # Add documents to the collection
+        collection.add(
+            documents=chunks,
+            embeddings=embeddings,
+            metadatas=[{"source": pdf_file, "chunk_id": i} for i in range(len(chunks))],
+            ids=[f"{pdf_file}_{i}" for i in range(len(chunks))]
+        )
 
 print("Vector database saved in 'vectordb' directory.")
