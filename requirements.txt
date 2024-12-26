@@ -1,0 +1,5 @@
+torch
+transformers
+faiss-cpu
+PyPDF2
+groq
