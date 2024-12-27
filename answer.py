@@ -1,11 +1,12 @@
 import os
 import PyPDF2
+import streamlit as st
 from transformers import AutoTokenizer, AutoModel
 import torch
 import chromadb
 from groq import Groq
 
-
+# Initialize the Groq API client
 client = Groq(api_key="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")
 
 # Load the embedding model
@@ -17,6 +18,8 @@ model = AutoModel.from_pretrained(embedding_model_name).to('cpu')
 chroma_client = chromadb.PersistentClient(path="vectordb")
 collection = chroma_client.get_collection("all_pdfs")
 
+
+# Define helper functions
 def encode_question(question):
     """Convert a question into an embedding."""
     inputs = tokenizer(question, padding=True, truncation=True, return_tensors="pt")
@@ -25,6 +28,7 @@ def encode_question(question):
         embedding = outputs.last_hidden_state[:, 0, :]
     return embedding.cpu().numpy().tolist()[0]
 
+
 def search_similar_chunks(question_embedding, top_k=20):
     """Search for the top k similar chunks in the ChromaDB collection."""
     results = collection.query(
@@ -32,6 +36,7 @@ def search_similar_chunks(question_embedding, top_k=20):
         n_results=top_k
     )
     return list(zip(results['documents'][0], results['metadatas'][0], results['distances'][0]))
+
 
 def answer_question(question):
     try:
@@ -46,8 +51,6 @@ def answer_question(question):
         for chunk_content, metadata, distance in similar_chunks:
             context += f"From {metadata['source']}, chunk {metadata['chunk_id']}:\n{chunk_content}\n\n"
 
-        print("Context retrieved successfully.")  # Debug print
-
         # Prepare the prompt for the LLM
         prompt = f"""Context information is below.
         ---------------------
@@ -55,8 +58,6 @@ def answer_question(question):
         ---------------------
         Given the context information and not prior knowledge, answer the question: {question}
         """
-
-        print(prompt)
 
         # Use Groq API to get the answer
         chat_completion = client.chat.completions.create(
@@ -75,19 +76,31 @@ def answer_question(question):
             max_tokens=500,
         )
 
-        print("API call completed successfully.")  # Debug print
-
         return chat_completion.choices[0].message.content
     except Exception as e:
-        print(f"An error occurred: {str(e)}")  # Print the error message
         return f"An error occurred: {str(e)}"
 
-print("Starting the question-answering process...")  # Debug print
 
-# Example usage
-user_question = "clean energy"
-answer = answer_question(user_question)
-print(f"Question: {user_question}")
-print(f"Answer: {answer}")
+# Streamlit UI
+st.title("PDF Question Answering with AI")
 
-print("Process completed.")  # Debug print
+# Chat interface
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# User input
+user_input = st.text_input("Ask a question about the documents:", key="user_input")
+if st.button("Send") and user_input:
+    # Append user message
+    st.session_state.messages.append({"role": "user", "content": user_input})
+
+    # Generate the answer
+    answer = answer_question(user_input)
+    st.session_state.messages.append({"role": "assistant", "content": answer})
+
+# Display the chat messages
+for msg in st.session_state.messages:
+    if msg["role"] == "user":
+        st.chat_message("user").markdown(msg["content"])
+    elif msg["role"] == "assistant":
+        st.chat_message("assistant").markdown(msg["content"])
