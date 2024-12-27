@@ -30,7 +30,7 @@ def encode_question(question):
     return embedding.cpu().numpy().tolist()[0]
 
 
-def search_similar_chunks(question_embedding, top_k=20):
+def search_similar_chunks(question_embedding, top_k=10):
     """Search for the top k similar chunks in the ChromaDB collection."""
     results = collection.query(
         query_embeddings=[question_embedding],
