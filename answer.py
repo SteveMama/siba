@@ -4,6 +4,7 @@ import streamlit as st
 from transformers import AutoTokenizer, AutoModel
 import torch
 import chromadb
+from yt_search import *
 from groq import Groq
 
 # Initialize the Groq API client
@@ -38,6 +39,24 @@ def search_similar_chunks(question_embedding, top_k=20):
     return list(zip(results['documents'][0], results['metadatas'][0], results['distances'][0]))
 
 
+def search_youtube_videos_with_transcripts(query, top_n=3):
+    """Search for YouTube videos and retrieve their transcripts."""
+    query = " tony seba and " + query
+    youtube_results = search_youtube(query, max_results=top_n)
+    results = []
+    for video in youtube_results:
+        transcript = get_transcript(video['video_id'])
+        relevance = calculate_relevance(query, video['title'] + " " + video['description'] + " " + transcript)
+        results.append({
+            'title': video['title'],
+            'url': video['url'],
+            'relevance_score': relevance,
+            'transcript': transcript[:1000] + '...' if len(transcript) > 1000 else transcript  # Truncate long transcripts
+        })
+    # Sort by relevance
+    results.sort(key=lambda x: x['relevance_score'], reverse=True)
+    return results
+
 def answer_question(question):
     try:
         # Encode the question
@@ -50,6 +69,14 @@ def answer_question(question):
         context = ""
         for chunk_content, metadata, distance in similar_chunks:
             context += f"From {metadata['source']}, chunk {metadata['chunk_id']}:\n{chunk_content}\n\n"
+
+        print(context)
+        # Search for YouTube videos and transcripts
+        youtube_results = search_youtube_videos_with_transcripts(question, top_n=3)
+        for video in youtube_results:
+            context += f"From YouTube video '{video['title']}' ({video['url']}):\n{video['transcript']}\n\n"
+
+        print(context)
 
         # Prepare the prompt for the LLM
         prompt = f"""Context information is below.
@@ -80,16 +107,15 @@ def answer_question(question):
     except Exception as e:
         return f"An error occurred: {str(e)}"
 
-
 # Streamlit UI
-st.title("PDF Question Answering with AI")
+st.title("PDF and YouTube Question Answering with AI")
 
 # Chat interface
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 # User input
-user_input = st.text_input("Ask a question about the documents:", key="user_input")
+user_input = st.text_input("Ask a question about the documents or YouTube content:", key="user_input")
 if st.button("Send") and user_input:
     # Append user message
     st.session_state.messages.append({"role": "user", "content": user_input})
